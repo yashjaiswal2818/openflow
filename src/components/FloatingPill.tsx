@@ -1,107 +1,189 @@
-import React from 'react';
-import { Mic, Sparkles, Settings as SettingsIcon } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import {
+  AlertTriangle,
+  Archive,
+  AudioLines,
+  Check,
+  ClipboardCopy,
+  Loader2,
+  Mic,
+  Radio,
+  Square,
+  WifiOff,
+} from 'lucide-react';
+import type { DictationStatus } from '../lib/types';
+import { Waveform } from './Waveform';
+import { cn, KeyCap } from './ui';
 
-interface FloatingPillProps {
+export interface FloatingPillProps {
+  status: DictationStatus;
+  audioLevel: number;
   isRecording: boolean;
-  onToggleRecord: () => void;
-  statusText?: string;
+  latencyMs?: number | null;
+  demo: boolean;
+  hotkey: string;
+  message?: string;
   previewText?: string;
-  audioLevel?: number; // 0.0 to 1.0
+  online: boolean;
+  onToggle: () => void;
   onOpenStudio?: () => void;
 }
 
-export const FloatingPill: React.FC<FloatingPillProps> = ({
+const STATUS_COPY: Record<DictationStatus, { label: string; tone: string }> = {
+  ready: { label: 'Ready', tone: 'text-zinc-300' },
+  listening: { label: 'Listening', tone: 'text-brand-300' },
+  processing: { label: 'Formatting', tone: 'text-amber-300' },
+  pasted: { label: 'Pasted', tone: 'text-emerald-300' },
+  copied: { label: 'Copied', tone: 'text-emerald-300' },
+  saved: { label: 'Saved', tone: 'text-brand-300' },
+  error: { label: 'Error', tone: 'text-rose-300' },
+};
+
+function formatLatency(ms?: number | null): string | null {
+  if (ms == null || ms <= 0) return null;
+  return ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${ms}ms`;
+}
+
+/**
+ * The Wispr-Flow-style floating pill. Three widths:
+ *   resting  ->  260px  (status + hotkey)
+ *   listening->  auto   (waveform + elapsed seconds)
+ *   result   ->  auto   (latency + text preview)
+ */
+export function FloatingPill({
+  status,
+  audioLevel,
   isRecording,
-  onToggleRecord,
-  statusText = 'Ready',
+  latencyMs,
+  demo,
+  hotkey,
+  message,
   previewText,
-  audioLevel = 0.0,
-  onOpenStudio
-}) => {
-  // Generate 8 dynamic bars based on live audio level
-  const baseHeights = [8, 14, 20, 26, 22, 16, 12, 18];
-  const dynamicBars = baseHeights.map((base, i) => {
-    if (!isRecording) return 4;
-    // Boost based on live microphone level + frequency variance
-    const multiplier = 0.4 + audioLevel * (1.2 + (i % 3) * 0.4);
-    return Math.min(32, Math.max(6, Math.round(base * multiplier)));
-  });
+  online,
+  onToggle,
+  onOpenStudio,
+}: FloatingPillProps) {
+  const [elapsed, setElapsed] = useState(0);
+  const active = status === 'listening';
+  const processing = status === 'processing';
+
+  useEffect(() => {
+    if (!isRecording) {
+      setElapsed(0);
+      return;
+    }
+    const started = Date.now();
+    const timer = window.setInterval(() => setElapsed((Date.now() - started) / 1000), 100);
+    return () => window.clearInterval(timer);
+  }, [isRecording]);
+
+  const copy = STATUS_COPY[status] ?? STATUS_COPY.ready;
+  const latency = formatLatency(latencyMs);
+  const expanded =
+    active || processing || status === 'pasted' || status === 'copied' || status === 'saved' || status === 'error';
+
+  const detail = useMemo(() => {
+    if (!online) return 'Engine offline — start it with npm run engine';
+    if (status === 'listening') return 'Release to transcribe';
+    if (processing) return 'Removing fillers and formatting punctuation';
+    if (status === 'pasted') return message || 'Inserted into the active app';
+    if (status === 'copied') return message || 'On your clipboard — press paste';
+    if (status === 'saved') return message || 'Archived in history — clipboard unavailable';
+    if (status === 'error') return message || 'Something went wrong';
+    return previewText || message || 'Hold the hotkey and speak';
+  }, [message, online, previewText, processing, status]);
 
   return (
-    <div className="fixed bottom-8 left-1/2 -translate-x-1/2 z-50 transition-all duration-300 ease-out select-none">
-      <div className={`glass-pill rounded-full px-5 py-3 flex items-center gap-4 transition-all duration-300 ${
-        isRecording ? 'border-indigo-500/60 shadow-indigo-500/25 scale-105 ring-2 ring-indigo-500/20' : 'hover:border-white/20'
-      }`}>
-        
-        {/* Record Trigger Button */}
+    <div className="pointer-events-none fixed inset-x-0 bottom-6 z-50 flex justify-center px-4">
+      <div
+        className={cn(
+          'pointer-events-auto glass-pill flex items-center gap-3 rounded-full px-2.5 py-2 transition-all duration-300 ease-out',
+          expanded ? 'max-w-[min(92vw,560px)]' : 'max-w-[min(92vw,340px)]',
+          active && 'ring-1 ring-brand-400/40 shadow-[0_0_40px_-8px_rgba(99,102,241,0.55)]',
+          status === 'pasted' && 'ring-1 ring-emerald-400/35 shadow-[0_0_40px_-10px_rgba(52,211,153,0.5)]',
+          status === 'error' && 'ring-1 ring-rose-400/40',
+          !online && 'ring-1 ring-amber-400/30',
+        )}
+        role="status"
+        aria-live="polite"
+      >
         <button
-          onClick={onToggleRecord}
-          className={`relative p-2.5 rounded-full flex items-center justify-center transition-all ${
-            isRecording 
-              ? 'bg-rose-500 text-white shadow-lg shadow-rose-500/50 animate-pulse' 
-              : 'bg-indigo-600 hover:bg-indigo-500 text-white shadow-md shadow-indigo-600/30'
-          }`}
-          title={isRecording ? "Stop recording" : "Hold Ctrl+Space or click to dictate"}
+          type="button"
+          onClick={onToggle}
+          disabled={!online}
+          aria-label={isRecording ? 'Stop dictation' : 'Start dictation'}
+          className={cn(
+            'relative flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-white transition-all',
+            !online && 'cursor-not-allowed bg-white/10 text-zinc-500',
+            online && isRecording && 'bg-rose-500 shadow-lg shadow-rose-500/40 hover:bg-rose-400',
+            online && !isRecording && 'bg-brand-600 shadow-lg shadow-brand-600/30 hover:bg-brand-500',
+          )}
         >
-          <Mic className="w-4 h-4" />
-          {isRecording && (
-            <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-rose-400 rounded-full animate-ping" />
+          {!online ? (
+            <WifiOff className="h-4 w-4" />
+          ) : isRecording ? (
+            <Square className="h-3.5 w-3.5 fill-current" />
+          ) : (
+            <Mic className="h-4 w-4" />
+          )}
+          {active && (
+            <span className="absolute inset-0 rounded-full ring-1 ring-rose-300/50 ping-ring" />
           )}
         </button>
 
-        {/* Dynamic Center: Audio Waveform or Status */}
-        <div className="flex flex-col min-w-[150px] max-w-[320px]">
-          {isRecording ? (
-            <div className="flex items-center gap-1.5 h-7 px-1">
-              {dynamicBars.map((height, i) => (
-                <div
-                  key={i}
-                  className="w-1.5 bg-gradient-to-t from-indigo-500 via-purple-400 to-pink-400 rounded-full transition-all duration-75"
-                  style={{ height: `${height}px` }}
-                />
-              ))}
-              <span className="text-xs font-semibold text-indigo-300 ml-2 animate-pulse">
-                Listening...
-              </span>
-            </div>
-          ) : (
-            <div className="flex items-center gap-2">
-              <span className={`w-2 h-2 rounded-full ${
-                statusText === 'pasted' ? 'bg-emerald-400 animate-ping' :
-                statusText === 'processing' ? 'bg-amber-400 animate-pulse' :
-                'bg-emerald-400'
-              }`} />
-              <span className="text-xs font-semibold text-zinc-300 tracking-wide uppercase">
-                {statusText}
-              </span>
-              <span className="text-[10px] text-zinc-400 px-1.5 py-0.5 rounded bg-zinc-800/80 border border-zinc-700/80 font-mono">
-                Ctrl+Space
-              </span>
-            </div>
-          )}
+        <div className="min-w-0 flex-1 pr-1">
+          <div className="flex items-center gap-2">
+            {active && (
+              <Waveform level={audioLevel} active={active} maxHeight={22} className="mr-0.5" />
+            )}
 
-          {previewText && (
-            <p className="text-xs text-zinc-400 truncate mt-0.5 font-medium">
-              {previewText}
-            </p>
-          )}
+            {processing && <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-amber-300 spinner" />}
+            {status === 'pasted' && <Check className="h-3.5 w-3.5 shrink-0 text-emerald-300" />}
+            {status === 'copied' && <ClipboardCopy className="h-3.5 w-3.5 shrink-0 text-emerald-300" />}
+            {status === 'saved' && <Archive className="h-3.5 w-3.5 shrink-0 text-brand-300" />}
+            {status === 'error' && <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-rose-300" />}
+            {status === 'ready' && online && <Radio className="h-3.5 w-3.5 shrink-0 text-emerald-400" />}
+            {!online && <WifiOff className="h-3.5 w-3.5 shrink-0 text-amber-300" />}
+
+            <span className={cn('truncate text-xs font-semibold tracking-wide', !online ? 'text-amber-200' : copy.tone)}>
+              {!online ? 'Disconnected' : copy.label}
+              {active && (
+                <span className="ml-1.5 font-mono text-[11px] font-normal text-brand-200/70">
+                  {elapsed.toFixed(1)}s
+                </span>
+              )}
+            </span>
+
+            {demo && (
+              <span className="shrink-0 rounded-full bg-amber-400/10 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-amber-300 ring-1 ring-amber-400/25">
+                demo
+              </span>
+            )}
+            {latency && !isRecording && (
+              <span className="shrink-0 font-mono text-[10px] text-zinc-500">{latency}</span>
+            )}
+          </div>
+
+          <p className="mt-0.5 truncate text-[11px] leading-tight text-zinc-500">{detail}</p>
         </div>
 
-        {/* Divider */}
-        <div className="h-5 w-[1px] bg-zinc-800" />
-
-        {/* Studio Button */}
-        {onOpenStudio && (
-          <button
-            onClick={onOpenStudio}
-            className="p-1.5 text-zinc-400 hover:text-white hover:bg-white/5 rounded-lg transition-colors"
-            title="Open OpenFlow Studio"
-          >
-            <SettingsIcon className="w-4 h-4" />
-          </button>
+        {!expanded && online && (
+          <div className="hidden items-center gap-1 pr-1 sm:flex">
+            <KeyCap>{hotkey}</KeyCap>
+          </div>
         )}
 
+        {onOpenStudio && (
+          <button
+            type="button"
+            onClick={onOpenStudio}
+            aria-label="Open OpenFlow Studio"
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-zinc-500 transition-colors hover:bg-white/5 hover:text-white"
+          >
+            <AudioLines className="h-4 w-4" />
+          </button>
+        )}
       </div>
     </div>
   );
-};
+}

@@ -1,74 +1,46 @@
-import React, { useState, useEffect } from 'react';
-import { StudioDashboard } from './components/StudioDashboard';
+import { useState } from 'react';
+import { AlertTriangle, X } from 'lucide-react';
+import { useEngine } from './hooks/useEngine';
 import { FloatingPill } from './components/FloatingPill';
+import { StudioDashboard } from './components/StudioDashboard';
+import type { TabId } from './components/Sidebar';
 
 export function App() {
-  const [isRecording, setIsRecording] = useState(false);
-  const [statusText, setStatusText] = useState('Ready');
-  const [previewText, setPreviewText] = useState('');
-  const [audioLevel, setAudioLevel] = useState(0.0);
-
-  // Poll live engine state from localhost:18488
-  useEffect(() => {
-    const interval = setInterval(async () => {
-      try {
-        const res = await fetch('http://127.0.0.1:18488/api/state');
-        if (res.ok) {
-          const state = await res.json();
-          setIsRecording(state.is_recording);
-          setStatusText(state.status);
-          setPreviewText(state.preview_text || '');
-          setAudioLevel(state.audio_level || 0.0);
-        }
-      } catch {
-        // Server might be paused
-      }
-    }, 120);
-
-    return () => clearInterval(interval);
-  }, []);
-
-  const handleToggleRecord = async () => {
-    try {
-      if (!isRecording) {
-        await fetch('http://127.0.0.1:18488/api/dictation/start', { method: 'POST' });
-      } else {
-        await fetch('http://127.0.0.1:18488/api/dictation/stop', { method: 'POST' });
-      }
-    } catch {
-      // Local fallback simulation if engine is offline
-      if (!isRecording) {
-        setIsRecording(true);
-        setStatusText('Listening...');
-        setPreviewText('Listening to microphone...');
-      } else {
-        setIsRecording(false);
-        setStatusText('Processing...');
-        setPreviewText('Transcribing and formatting...');
-        setTimeout(() => {
-          setStatusText('Pasted');
-          setPreviewText('Pasted cleanly into active app');
-          setTimeout(() => {
-            setStatusText('Ready');
-            setPreviewText('');
-          }, 2000);
-        }, 600);
-      }
-    }
-  };
+  const engine = useEngine();
+  const [tab, setTab] = useState<TabId>('dictation');
+  const { state, capabilities, config } = engine;
 
   return (
-    <div className="relative w-screen h-screen overflow-hidden bg-[#0c0d12]">
-      {/* Studio Workspace Dashboard */}
-      <StudioDashboard />
+    <div className="relative flex h-screen w-full overflow-hidden bg-ink-950 text-zinc-100 grid-backdrop">
+      <StudioDashboard engine={engine} tab={tab} onTabChange={setTab} />
 
-      {/* Wispr Flow-style Floating Pill HUD */}
+      {engine.error && (
+        <div className="pointer-events-auto fixed right-4 top-4 z-50 flex max-w-sm items-start gap-2 rounded-xl border border-rose-400/30 bg-rose-950/80 px-3.5 py-2.5 text-[11px] text-rose-100 shadow-xl backdrop-blur">
+          <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-rose-300" />
+          <p className="flex-1 leading-relaxed">{engine.error}</p>
+          <button
+            type="button"
+            onClick={() => engine.setError(null)}
+            aria-label="Dismiss error"
+            className="rounded p-0.5 text-rose-300/70 transition-colors hover:text-white"
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      )}
+
       <FloatingPill
-        isRecording={isRecording}
-        onToggleRecord={handleToggleRecord}
-        statusText={statusText}
-        previewText={previewText}
-        audioLevel={audioLevel}
+        status={state?.status ?? 'ready'}
+        audioLevel={state?.audio_level ?? 0}
+        isRecording={!!state?.is_recording}
+        latencyMs={state?.latency_ms ?? null}
+        demo={capabilities?.demo_mode ?? state?.demo ?? false}
+        hotkey={config?.hotkey ?? 'Ctrl+Space'}
+        message={state?.message}
+        previewText={state?.preview_text}
+        online={engine.online}
+        onToggle={() => void engine.toggleDictation()}
+        onOpenStudio={() => setTab('dictation')}
       />
     </div>
   );

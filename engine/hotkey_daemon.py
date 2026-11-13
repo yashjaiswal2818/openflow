@@ -1,154 +1,173 @@
 """
-OpenFlow Global Hotkey & Push-to-Talk Daemon
-============================================
-Listens globally for dictation triggers (e.g. Ctrl+Space) across the entire OS.
-Orchestrates: Press -> Record Audio -> Transcribe -> Clean -> Auto-Paste into active window.
+OpenFlow Global Hotkey Daemon
+=============================
+Listens for the dictation shortcut anywhere in the OS and drives the recording
+lifecycle through injected callbacks, so the daemon stays independent of the
+HTTP layer.
+
+Two interaction modes (config ``hold_to_talk``):
+    * push-to-talk — hold the chord while speaking, release to transcribe
+    * toggle       — tap once to start, tap again to stop
+
+``pynput`` is optional. Without it the daemon reports ``available: False`` and
+the Studio's on-screen buttons remain fully functional.
 """
 
 from __future__ import annotations
-import time
+
 import logging
 import threading
-from typing import Optional, Callable
-from pynput import keyboard
-
-from engine.audio_recorder import AudioRecorder
-from engine.whisper_engine import WhisperEngine
-from engine.system_injector import SystemInjector
-from engine.history_manager import HistoryManager
-from engine.models_manager import ModelPresetManager
+from typing import Callable, Optional, Set, Tuple
 
 logger = logging.getLogger("OpenFlow.Hotkey")
 
+try:  # pragma: no cover - optional dependency
+    from pynput import keyboard  # type: ignore
+    _HAVE_PYNPUT = True
+except Exception:  # pragma: no cover
+    keyboard = None  # type: ignore
+    _HAVE_PYNPUT = False
+
+MODIFIER_ALIASES = {
+    "ctrl": "ctrl", "control": "ctrl", "cmd": "cmd", "command": "cmd",
+    "super": "cmd", "win": "cmd", "alt": "alt", "option": "alt", "opt": "alt",
+    "shift": "shift", "fn": "fn",
+}
+
+
+def parse_hotkey(combo: str) -> Tuple[Set[str], str]:
+    """``"Ctrl+Shift+Space"`` -> ``({"ctrl", "shift"}, "space")``."""
+    parts = [p.strip().lower() for p in (combo or "").split("+") if p.strip()]
+    if not parts:
+        return set(), "space"
+    *modifiers, key = parts
+    return {MODIFIER_ALIASES.get(m, m) for m in modifiers}, key
+
 
 class HotkeyDaemon:
-    """Listens globally for shortcuts and manages Push-to-Talk dictation."""
+    """Global shortcut listener with push-to-talk and toggle support."""
 
     def __init__(
         self,
-        on_state_change: Optional[Callable[[str, Optional[str], float], None]] = None
-    ):
-        self.audio_recorder = AudioRecorder(on_level_change=self._on_audio_level)
-        self.whisper_engine = WhisperEngine()
-        self.history_manager = HistoryManager()
-        self.preset_manager = ModelPresetManager()
-        self.system_injector = SystemInjector()
-
-        self.on_state_change = on_state_change  # (status, text_preview, audio_level)
+        on_start: Optional[Callable[[], None]] = None,
+        on_stop: Optional[Callable[[], None]] = None,
+        hotkey: str = "Ctrl+Space",
+        hold_to_talk: bool = True,
+    ) -> None:
+        self.on_start = on_start
+        self.on_stop = on_stop
+        self.hotkey = hotkey
+        self.hold_to_talk = hold_to_talk
         self.is_active = False
-        self._listener: Optional[keyboard.Listener] = None
-
-        # Key state tracking
-        self._ctrl_pressed = False
-        self._is_recording = False
+        self._listener = None
+        self._pressed_modifiers: Set[str] = set()
+        self._chord_down = False
         self._lock = threading.Lock()
+        self._unavailable_reason: Optional[str] = None
 
-    def _on_audio_level(self, level: float):
-        if self._is_recording and self.on_state_change:
-            self.on_state_change("listening", None, level)
+    # -- capability ---------------------------------------------------------
+    def capabilities(self) -> dict:
+        return {
+            "available": _HAVE_PYNPUT,
+            "hotkey": self.hotkey,
+            "mode": "push-to-talk" if self.hold_to_talk else "toggle",
+            "reason": self._unavailable_reason
+            or (None if _HAVE_PYNPUT else "Install 'pynput' for global hotkeys; the on-screen controls still work."),
+        }
 
-    def _start_dictation(self):
-        with self._lock:
-            if self._is_recording:
-                return
-            self._is_recording = True
+    def configure(self, hotkey: str, hold_to_talk: bool) -> None:
+        was_active = self.is_active
+        if was_active:
+            self.stop()
+        self.hotkey = hotkey
+        self.hold_to_talk = hold_to_talk
+        if was_active:
+            self.start()
 
-        logger.info("Push-to-Talk triggered: Recording started")
-        if self.on_state_change:
-            self.on_state_change("listening", "Listening to microphone...", 0.0)
+    # -- listener -----------------------------------------------------------
+    def _normalise(self, key) -> Optional[str]:  # noqa: ANN001
+        if keyboard is None:
+            return None
+        mapping = {
+            keyboard.Key.ctrl: "ctrl", keyboard.Key.ctrl_l: "ctrl", keyboard.Key.ctrl_r: "ctrl",
+            keyboard.Key.cmd: "cmd", keyboard.Key.cmd_l: "cmd", keyboard.Key.cmd_r: "cmd",
+            keyboard.Key.alt: "alt", keyboard.Key.alt_l: "alt", keyboard.Key.alt_r: "alt",
+            keyboard.Key.shift: "shift", keyboard.Key.shift_l: "shift", keyboard.Key.shift_r: "shift",
+            keyboard.Key.space: "space", keyboard.Key.enter: "enter", keyboard.Key.esc: "esc",
+        }
+        if key in mapping:
+            return mapping[key]
+        char = getattr(key, "char", None)
+        return char.lower() if char else None
 
-        try:
-            self.audio_recorder.start()
-        except Exception as e:
-            logger.error(f"Failed to start recording: {e}")
-            self._is_recording = False
+    def _modifiers_ok(self, expected: Set[str]) -> bool:
+        return expected.issubset(self._pressed_modifiers)
 
-    def _stop_and_paste(self):
-        with self._lock:
-            if not self._is_recording:
-                return
-            self._is_recording = False
+    def _on_press(self, key) -> None:  # noqa: ANN001
+        name = self._normalise(key)
+        if name is None:
+            return
+        if name in {"ctrl", "cmd", "alt", "shift"}:
+            self._pressed_modifiers.add(name)
 
-        logger.info("Push-to-Talk released: Processing audio")
-        if self.on_state_change:
-            self.on_state_change("processing", "Transcribing & formatting text...", 0.0)
-
-        # 1. Stop audio capture and save raw WAV
-        wav_path, duration = self.audio_recorder.stop()
-        if not wav_path or duration < 0.2:
-            logger.info("Audio too short, discarded.")
-            if self.on_state_change:
-                self.on_state_change("ready", "", 0.0)
+        mods, main_key = parse_hotkey(self.hotkey)
+        if name != main_key or not self._modifiers_ok(mods):
             return
 
-        # 2. Transcribe and clean
-        config = self.preset_manager.get_config()
-        raw_text, clean_text = self.whisper_engine.transcribe(
-            wav_path,
-            spoken_punctuation=config.get("spoken_punctuation", True),
-            strip_fillers=config.get("strip_filler_words", True)
-        )
+        with self._lock:
+            if self.hold_to_talk:
+                if self._chord_down:
+                    return
+                self._chord_down = True
+                should_start = True
+            else:
+                self._chord_down = not self._chord_down
+                should_start = self._chord_down
 
-        # 3. Log to persistent history
-        if clean_text:
-            self.history_manager.log_entry(
-                raw_text=raw_text,
-                cleaned_text=clean_text,
-                audio_path=wav_path,
-                duration=duration,
-                preset_used=config.get("active_preset", "balanced")
-            )
+        if should_start and self.on_start:
+            logger.info("Hotkey %s pressed — starting dictation", self.hotkey)
+            self.on_start()
+        elif not should_start and self.on_stop:
+            logger.info("Hotkey %s pressed — stopping dictation", self.hotkey)
+            self.on_stop()
 
-            # 4. Auto-paste directly into active app
-            logger.info(f"Pasting text: '{clean_text}'")
-            self.system_injector.paste_into_active_window(clean_text)
+    def _on_release(self, key) -> None:  # noqa: ANN001
+        name = self._normalise(key)
+        if name is None:
+            return
+        if name in {"ctrl", "cmd", "alt", "shift"}:
+            self._pressed_modifiers.discard(name)
+            if self.hold_to_talk and self._chord_down:
+                with self._lock:
+                    self._chord_down = False
+                if self.on_stop:
+                    logger.info("Hotkey released — stopping dictation")
+                    self.on_stop()
 
-            if self.on_state_change:
-                self.on_state_change("pasted", clean_text, 0.0)
-        else:
-            if self.on_state_change:
-                self.on_state_change("ready", "", 0.0)
-
-        # Reset state after 1.8 seconds
-        def _reset():
-            time.sleep(1.8)
-            if self.on_state_change and not self._is_recording:
-                self.on_state_change("ready", "", 0.0)
-
-        threading.Thread(target=_reset, daemon=True).start()
-
-    def _on_press(self, key):
-        # Check for Ctrl (or Command on macOS) + Space
-        if key in (keyboard.Key.ctrl, keyboard.Key.ctrl_l, keyboard.Key.ctrl_r):
-            self._ctrl_pressed = True
-
-        if key == keyboard.Key.space and self._ctrl_pressed:
-            self._start_dictation()
-
-    def _on_release(self, key):
-        if key in (keyboard.Key.ctrl, keyboard.Key.ctrl_l, keyboard.Key.ctrl_r):
-            self._ctrl_pressed = False
-            if self._is_recording:
-                self._stop_and_paste()
-
-        if key == keyboard.Key.space and self._is_recording:
-            # In hold-space mode, releasing space triggers stop
-            self._stop_and_paste()
-
-    def start(self):
-        """Starts background hotkey listening thread."""
+    def start(self) -> bool:
+        if not _HAVE_PYNPUT:
+            self._unavailable_reason = "pynput is not installed; global hotkeys disabled."
+            logger.warning(self._unavailable_reason)
+            return False
         if self.is_active:
-            return
-        self.is_active = True
-        self._listener = keyboard.Listener(
-            on_press=self._on_press,
-            on_release=self._on_release
-        )
-        self._listener.start()
-        logger.info("Global Push-to-Talk daemon active (Hold Ctrl+Space to speak).")
+            return True
+        try:
+            self._listener = keyboard.Listener(on_press=self._on_press, on_release=self._on_release)
+            self._listener.daemon = True
+            self._listener.start()
+            self.is_active = True
+            logger.info("Global hotkey %s bound (%s)", self.hotkey, self.capabilities()["mode"])
+            return True
+        except Exception as exc:  # pragma: no cover - platform specific
+            self._unavailable_reason = f"Could not bind global hotkey: {exc}"
+            logger.warning(self._unavailable_reason)
+            return False
 
-    def stop(self):
-        self.is_active = False
+    def stop(self) -> None:
         if self._listener is not None:
-            self._listener.stop()
+            try:
+                self._listener.stop()
+            except Exception:
+                pass
             self._listener = None
+        self.is_active = False

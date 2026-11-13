@@ -1,0 +1,25 @@
+# OpenFlow engine dependencies
+# ----------------------------
+# The engine runs with the Python standard library alone: the dictation cleaner,
+# history store, WAV archive, HTTP daemon and the preview TTS vocoder are all
+# dependency-free. Install the extras below to unlock real hardware and models.
+#
+#   pip install -r requirements.txt
+#
+# Each group is optional; OpenFlow detects what is present at runtime and
+# reports it in the Studio under Settings → Diagnostics.
+
+# --- Voice input (dictation) -------------------------------------------------
+faster-whisper>=1.0.0     # Whisper via CTranslate2 (int8 CPU, 4x faster)
+sounddevice>=0.4.6        # PortAudio bindings: CoreAudio / WASAPI / ALSA capture
+numpy>=1.24               # fast RMS metering and 16-bit conversion
+pynput>=1.7.6             # global hotkeys + native paste keystrokes
+
+# --- Voice output (cloning / TTS) --------------------------------------------
+kokoro-onnx>=0.3.0        # Kokoro-82M neural TTS (Balanced preset)
+onnxruntime>=1.17         # ONNX runtime used by Kokoro
+soundfile>=0.12           # audio playback on read-aloud
+
+# --- Optional quality boosters ----------------------------------------------
+# silero-vad>=5.0         # neural VAD; OpenFlow falls back to energy VAD
+# openai-whisper>=20231117  # PyTorch Whisper, used if faster-whisper is absent

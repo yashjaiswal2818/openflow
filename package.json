@@ -1,25 +1,37 @@
 {
   "name": "openflow",
   "version": "1.0.0",
+  "private": true,
   "type": "module",
-  "description": "OpenFlow — The open-source, local-first Voice OS for intelligent dictation & zero-shot voice cloning.",
+  "description": "OpenFlow — the open-source, 100% offline voice OS for intelligent dictation and zero-shot voice cloning.",
   "scripts": {
-    "dev": "vite",
-    "build": "vite build",
+    "dev": "node scripts/dev.mjs",
+    "dev:web": "vite",
+    "engine": "python3 -m engine.server",
+    "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
-    "engine": "python3 engine/server.py"
+    "typecheck": "tsc --noEmit",
+    "test:py": "python3 -m unittest discover -s tests -t .",
+    "test": "npm run typecheck && npm run test:py",
+    "tauri": "tauri"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
+  "keywords": [
+    "dictation",
+    "speech-to-text",
+    "voice-cloning",
+    "tts",
+    "offline",
+    "whisper",
+    "kokoro",
+    "tauri"
+  ],
+  "author": "OpenFlow Contributors",
+  "license": "MIT",
   "devDependencies": {
     "@tailwindcss/vite": "^4.3.5",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^6.3.0",
-    "autoprefixer": "^10.6.2",
-    "esbuild": "^0.28.2",
-    "postcss": "^8.5.32",
     "tailwindcss": "^4.3.5",
     "typescript": "^7.0.2",
     "vite": "^8.3.8"
