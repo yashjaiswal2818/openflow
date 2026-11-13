@@ -1,0 +1,29 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Build outputs
+dist/
+build/
+target/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+
+# Environment and IDEs
+.DS_Store
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Local OpenFlow runtime data
+.openflow/
