@@ -1,26 +1,34 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import {
-  AlertTriangle,
-  Check,
-  Copy,
-  Eraser,
-  Gauge,
-  Mic,
-  Sparkles,
-  Square,
-  Wand2,
-} from 'lucide-react';
+import { Check, Copy, Mic, Square } from 'lucide-react';
 import { api } from '../../lib/api';
 import type { CleanReport, DictationResult } from '../../lib/types';
 import type { EngineStore } from '../../hooks/useEngine';
 import { AudioClip } from '../AudioClip';
 import { Waveform } from '../Waveform';
-import { Badge, Button, cn, EmptyState, KeyCap, Panel, SectionHeading, Toggle } from '../ui';
+import {
+  Badge,
+  Button,
+  cn,
+  EmptyState,
+  Keycap,
+  Panel,
+  PanelHeader,
+  StatusDot,
+  Switch,
+} from '../ui';
 
-const SAMPLE_RAW =
-  'uh so basically i think that the the openflow engine is super fast comma new line ready for production period';
+const SAMPLE = 'uh so basically i think that the the openflow engine is super fast comma new line ready for production period';
 
-function useTicker(active: boolean): number {
+const RULE_LABELS: Array<[keyof CleanReport, string]> = [
+  ['fillers_removed', 'fillers'],
+  ['stutters_collapsed', 'stutters'],
+  ['punctuation_converted', 'punctuation'],
+  ['acronyms_fixed', 'acronyms'],
+  ['sentences_capitalized', 'casing'],
+  ['crutches_removed', 'crutches'],
+];
+
+function useNow(active: boolean): number {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     if (!active) return;
@@ -30,365 +38,309 @@ function useTicker(active: boolean): number {
   return now;
 }
 
-function ReportChips({ report }: { report: CleanReport }) {
-  const items = [
-    { label: 'fillers', value: report.fillers_removed },
-    { label: 'stutters', value: report.stutters_collapsed },
-    { label: 'punctuation', value: report.punctuation_converted },
-    { label: 'acronyms', value: report.acronyms_fixed },
-    { label: 'casing', value: report.sentences_capitalized },
-    { label: 'crutches', value: report.crutches_removed },
-  ].filter((item) => item.value > 0);
+function FixSummary({ report }: { report: CleanReport }) {
+  const items = RULE_LABELS.map(([key, label]) => [label, Number(report[key] ?? 0)] as const).filter(
+    ([, value]) => value > 0,
+  );
 
-  if (!items.length) {
-    return <span className="text-[11px] text-zinc-500">No changes — the transcript was already clean.</span>;
-  }
+  if (!items.length) return <span className="text-[10.5px] text-muted">no changes</span>;
 
   return (
-    <div className="flex flex-wrap items-center gap-1.5">
-      <span className="text-[11px] font-medium text-emerald-300">
-        {report.total_fixes} fixes
-      </span>
-      {items.map((item) => (
-        <span
-          key={item.label}
-          className="rounded-md bg-white/5 px-1.5 py-0.5 font-mono text-[10px] text-zinc-400 ring-1 ring-white/8"
-        >
-          {item.value} {item.label}
+    <span className="tabular font-mono text-[10.5px] text-muted">
+      {items.map(([label, value], index) => (
+        <span key={label}>
+          {index > 0 && <span className="px-1 text-[#3a3a40]">·</span>}
+          {value} {label}
         </span>
       ))}
+    </span>
+  );
+}
+
+function PhaseRow({ label, value, ok }: { label: string; value: string; ok: boolean }) {
+  return (
+    <div className="px-4 py-2.5">
+      <p className="text-[10px] font-medium uppercase tracking-wide text-muted">{label}</p>
+      <p className={cn('mt-0.5 flex items-center gap-1.5 truncate text-[11.5px]', ok ? 'text-dim' : 'text-warn')}>
+        <StatusDot tone={ok ? 'ok' : 'warn'} />
+        <span className="truncate">{value}</span>
+      </p>
     </div>
   );
 }
 
 export function DictationTab({ engine }: { engine: EngineStore }) {
   const { state, capabilities, config, online } = engine;
-  const [testInput, setTestInput] = useState(SAMPLE_RAW);
+  const [input, setInput] = useState(SAMPLE);
   const [report, setReport] = useState<CleanReport | null>(null);
   const [cleaning, setCleaning] = useState(false);
-  const [saveToHistory, setSaveToHistory] = useState(false);
-  const [copied, setCopied] = useState(false);
-  const [localError, setLocalError] = useState<string | null>(null);
+  const [save, setSave] = useState(false);
+  const [copied, setCopied] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const copyTimer = useRef<number | null>(null);
 
   const isRecording = !!state?.is_recording;
-  const now = useTicker(isRecording);
+  const now = useNow(isRecording);
   const elapsed = state?.started_at ? Math.max(0, (now - state.started_at * 1000) / 1000) : 0;
-  const lastResult: DictationResult | null = state?.last_result ?? null;
-  const demo = capabilities?.demo_mode ?? state?.demo ?? false;
+  const last: DictationResult | null = state?.last_result ?? null;
+  const demo = capabilities?.demo_mode ?? false;
   const hotkey = config?.hotkey ?? 'Ctrl+Space';
 
   useEffect(() => () => {
     if (copyTimer.current) window.clearTimeout(copyTimer.current);
   }, []);
 
+  const copy = async (text: string, id: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(id);
+      if (copyTimer.current) window.clearTimeout(copyTimer.current);
+      copyTimer.current = window.setTimeout(() => setCopied(null), 1500);
+    } catch {
+      setError('Clipboard access was blocked by the browser.');
+    }
+  };
+
   const runCleaner = async () => {
     setCleaning(true);
-    setLocalError(null);
-    const result = await engine.cleanText(testInput, saveToHistory);
-    if (!result) {
-      setLocalError('The cleaner did not return a result. Is the engine running?');
-    }
+    setError(null);
+    const result = await engine.cleanText(input, save);
+    if (!result) setError('The cleaner did not return a result. Is the engine running?');
     setReport(result);
     setCleaning(false);
   };
 
-  const copyText = async (text: string) => {
-    try {
-      await navigator.clipboard.writeText(text);
-      setCopied(true);
-      if (copyTimer.current) window.clearTimeout(copyTimer.current);
-      copyTimer.current = window.setTimeout(() => setCopied(false), 1800);
-    } catch {
-      setLocalError('Clipboard access was blocked by the browser.');
-    }
-  };
+  const phases = useMemo(
+    () => [
+      {
+        label: 'Input',
+        ok: !!capabilities?.microphone.available,
+        value: capabilities?.microphone.available
+          ? capabilities.microphone.device ?? 'Microphone'
+          : demo
+            ? 'Simulated capture'
+            : 'No microphone',
+      },
+      {
+        label: 'Speech-to-text',
+        ok: !!capabilities?.stt.available,
+        value: capabilities?.stt.available
+          ? `${capabilities.stt.backend ?? 'whisper'} · ${capabilities.stt.model ?? ''}`.trim()
+          : demo
+            ? 'Demo transcript'
+            : 'Whisper not installed',
+      },
+      {
+        label: 'Cleaner',
+        ok: true,
+        value: 'Local rules, deterministic',
+      },
+      {
+        label: 'Insertion',
+        ok: !!capabilities?.injector.clipboard,
+        value: capabilities?.injector.clipboard
+          ? `Clipboard · ${capabilities.injector.clipboard_tool}`
+          : 'Clipboard unavailable',
+      },
+    ],
+    [capabilities, demo],
+  );
 
-  const pipeline = useMemo(() => ([
-    {
-      title: 'Capture',
-      detail: capabilities?.microphone.available
-        ? capabilities.microphone.device ?? 'Microphone ready'
-        : demo ? 'Simulated capture' : 'No microphone',
-      ok: capabilities?.microphone.available ?? false,
-    },
-    {
-      title: 'Transcribe',
-      detail: capabilities?.stt.available
-        ? `${capabilities.stt.backend} · ${capabilities.stt.model}`
-        : demo ? 'Demo transcript' : 'Whisper missing',
-      ok: capabilities?.stt.available ?? false,
-    },
-    {
-      title: 'Clean',
-      detail: 'Deterministic rules, <1 ms',
-      ok: true,
-    },
-    {
-      title: 'Insert',
-      detail: capabilities?.injector.clipboard
-        ? `Clipboard via ${capabilities.injector.clipboard_tool ?? 'system tool'}`
-        : demo ? 'Clipboard unavailable' : 'Clipboard unavailable',
-      ok: capabilities?.injector.clipboard ?? false,
-    },
-  ]), [capabilities, demo]);
+  const stateLabel = !online
+    ? 'Engine offline'
+    : isRecording
+      ? 'Listening'
+      : state?.status === 'processing'
+        ? 'Formatting'
+        : demo
+          ? 'Ready — simulated capture'
+          : 'Ready';
 
-  const lastReport = (lastResult?.report ?? null) as CleanReport | null;
+  const hint = !online
+    ? 'Start the engine with npm run engine'
+    : isRecording
+      ? 'Speak, then release or click stop'
+      : demo
+        ? 'A simulated clip is captured, transcribed and cleaned'
+        : 'Click the button or hold the shortcut anywhere';
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
       {demo && (
-        <div className="flex items-start gap-3 rounded-2xl border border-amber-400/20 bg-amber-400/[0.06] px-4 py-3">
-          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-300" />
-          <div className="text-[12px] leading-relaxed text-amber-100/90">
-            <span className="font-semibold text-amber-200">Demo mode.</span>{' '}
-            {capabilities?.notes[0] ?? 'No microphone or Whisper runtime detected.'} Captures and transcripts are
-            simulated so you can exercise the full pipeline; the cleaner, history, WAV archiving and TTS are real.
-          </div>
-        </div>
+        <p className="rounded-md border border-line bg-panel px-3 py-2 text-[11.5px] leading-relaxed text-dim">
+          <span className="font-medium text-warn">Demo mode.</span>{' '}
+          {capabilities?.notes[0] ?? 'No microphone or Whisper runtime detected.'} The cleaner, history, WAV archive and
+          speech synthesis are real.
+        </p>
       )}
 
-      {!online && (
-        <div className="flex items-start gap-3 rounded-2xl border border-rose-400/25 bg-rose-500/[0.07] px-4 py-3">
-          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-rose-300" />
-          <div className="text-[12px] leading-relaxed text-rose-100/90">
-            <span className="font-semibold text-rose-200">Engine unreachable.</span> Start the local daemon with{' '}
-            <code className="rounded bg-black/30 px-1 py-0.5 font-mono text-[11px]">npm run engine</code> — the Studio
-            reconnects automatically.
-          </div>
-        </div>
-      )}
+      <Panel>
+        <div className="flex items-center gap-3 px-4 py-3.5">
+          <button
+            type="button"
+            onClick={() => void engine.toggleDictation()}
+            disabled={!online}
+            aria-label={isRecording ? 'Stop dictation' : 'Start dictation'}
+            className={cn(
+              'grid h-9 w-9 shrink-0 place-items-center rounded-full transition-colors',
+              !online
+                ? 'cursor-not-allowed bg-raised text-muted'
+                : isRecording
+                  ? 'bg-err text-white hover:bg-err/90'
+                  : 'bg-accent text-white hover:bg-accent-strong',
+            )}
+          >
+            {isRecording ? <Square className="h-3.5 w-3.5 fill-current" /> : <Mic className="h-4 w-4" />}
+          </button>
 
-      <Panel className="overflow-hidden">
-        <div className="border-b border-white/6 px-5 py-4">
-          <SectionHeading
-            title="Live dictation"
-            description="Hold the global shortcut anywhere on your system, speak, and release. The cleaned text is inserted at your cursor."
-            action={
-              <div className="flex items-center gap-2">
-                <Badge tone="brand">{hotkey}</Badge>
-                <Badge tone={config?.hold_to_talk ? 'violet' : 'neutral'}>
-                  {config?.hold_to_talk ? 'push-to-talk' : 'toggle'}
-                </Badge>
-              </div>
-            }
-          />
-        </div>
-
-        <div className="flex flex-col gap-5 px-5 py-5 sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex items-center gap-4">
-            <button
-              type="button"
-              onClick={() => void engine.toggleDictation()}
-              disabled={!online}
-              aria-label={isRecording ? 'Stop dictation' : 'Start dictation'}
-              className={cn(
-                'relative flex h-14 w-14 items-center justify-center rounded-full text-white transition-all',
-                !online && 'cursor-not-allowed bg-white/10 text-zinc-500',
-                online && isRecording
-                  ? 'bg-rose-500 shadow-xl shadow-rose-500/30 hover:bg-rose-400'
-                  : 'bg-brand-600 shadow-xl shadow-brand-600/25 hover:bg-brand-500',
+          <div className="min-w-0 flex-1">
+            <div className="flex items-baseline gap-2">
+              <span className="text-[12.5px] font-medium text-ink">{stateLabel}</span>
+              {isRecording && (
+                <span className="tabular font-mono text-[11px] text-dim">{elapsed.toFixed(1)}s</span>
               )}
-            >
-              {isRecording ? <Square className="h-4 w-4 fill-current" /> : <Mic className="h-5 w-5" />}
-              {isRecording && <span className="absolute inset-0 rounded-full ring-1 ring-rose-300/50 ping-ring" />}
-            </button>
-
-            <div>
-              <p className="text-sm font-semibold text-white">
-                {isRecording ? `Listening — ${elapsed.toFixed(1)}s` : demo ? 'Click to simulate dictation' : 'Ready to dictate'}
-              </p>
-              <p className="mt-0.5 text-xs text-zinc-400">
-                {isRecording
-                  ? 'Speak naturally. Silence is trimmed by the VAD before transcription.'
-                  : demo
-                    ? 'A simulated capture is recorded, transcribed and cleaned end-to-end.'
-                    : 'Click the mic or hold the shortcut anywhere in the OS.'}
-              </p>
             </div>
+            <p className="truncate text-[11px] text-muted">{hint}</p>
           </div>
 
-          <div className="flex items-center gap-4">
-            <Waveform
-              level={state?.audio_level ?? 0}
-              active={isRecording}
-              bars={12}
-              maxHeight={38}
-              minHeight={5}
-              className="h-10"
-            />
-            <div className="flex flex-col items-end gap-1 font-mono text-[10px] text-zinc-500">
-              <span className="flex items-center gap-1">
-                <Gauge className="h-3 w-3" />
-                {state?.latency_ms ? `${state.latency_ms} ms` : '— ms'}
-              </span>
-              <span>{state?.status ?? 'offline'}</span>
-            </div>
+          <Waveform level={state?.audio_level ?? 0} active={isRecording} className="hidden sm:flex" />
+
+          <div className="hidden shrink-0 items-center gap-2 text-[10.5px] text-muted sm:flex">
+            <Keycap>{hotkey}</Keycap>
+            <span className="tabular font-mono">
+              {state?.latency_ms ? `${state.latency_ms}ms` : '—'}
+            </span>
           </div>
         </div>
 
-        {pipeline.length > 0 && (
-          <div className="grid grid-cols-2 gap-px border-t border-white/6 bg-white/[0.03] sm:grid-cols-4">
-            {pipeline.map((step) => (
-              <div key={step.title} className="bg-ink-900/60 px-4 py-3">
-                <div className="flex items-center gap-1.5">
-                  <span className={cn('h-1.5 w-1.5 rounded-full', step.ok ? 'bg-emerald-400' : 'bg-amber-400')} />
-                  <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-400">{step.title}</span>
-                </div>
-                <p className="mt-1 truncate text-[11px] text-zinc-300" title={step.detail}>{step.detail}</p>
-              </div>
-            ))}
-          </div>
-        )}
+        <dl className="grid grid-cols-2 border-t border-line-soft sm:grid-cols-4 sm:divide-x sm:divide-line-soft">
+          {phases.map((phase) => (
+            <PhaseRow key={phase.label} {...phase} />
+          ))}
+        </dl>
       </Panel>
 
-      {lastResult?.cleaned_text && (
-        <Panel className="rise-in p-5">
-          <SectionHeading
+      {last?.cleaned_text && (
+        <Panel className="fade-in">
+          <PanelHeader
             title="Last capture"
-            description={`${lastResult.demo ? 'Demo transcript' : 'Whisper transcript'} · ${lastResult.duration ?? 0}s of audio`}
+            description={`${last.demo ? 'Demo transcript' : 'Whisper'} · ${last.duration ?? 0}s of audio`}
             action={
-              <div className="flex items-center gap-2">
-                {lastReport && <ReportChips report={lastReport} />}
-                <Button size="sm" variant="secondary" onClick={() => void copyText(lastResult.cleaned_text ?? '')}>
-                  {copied ? <Check className="h-3.5 w-3.5 text-emerald-400" /> : <Copy className="h-3.5 w-3.5" />}
-                  {copied ? 'Copied' : 'Copy'}
+              <>
+                {last.report && <FixSummary report={last.report} />}
+                <Button size="sm" variant="ghost" onClick={() => void copy(last.cleaned_text ?? '', 'last')}>
+                  {copied === 'last' ? <Check className="h-3 w-3 text-ok" /> : <Copy className="h-3 w-3" />}
+                  {copied === 'last' ? 'Copied' : 'Copy'}
                 </Button>
-              </div>
+              </>
             }
           />
-          <div className="mt-4 grid gap-4 lg:grid-cols-2">
-            <div className="rounded-xl border border-white/6 bg-black/25 p-3.5">
-              <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-zinc-500">Raw transcript</p>
-              <p className="whitespace-pre-wrap font-mono text-[12px] leading-relaxed text-zinc-400">{lastResult.raw_text}</p>
+
+          <div className="grid divide-y divide-line-soft md:grid-cols-2 md:divide-x md:divide-y-0">
+            <div className="px-4 py-3">
+              <p className="mb-1.5 text-[10px] font-medium uppercase tracking-wide text-muted">Raw</p>
+              <p className="whitespace-pre-wrap font-mono text-[11.5px] leading-relaxed text-dim">{last.raw_text}</p>
             </div>
-            <div className="rounded-xl border border-brand-500/20 bg-brand-500/[0.06] p-3.5">
-              <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-brand-300">Cleaned output</p>
-              <p className="whitespace-pre-wrap text-[13px] leading-relaxed text-white">{lastResult.cleaned_text}</p>
+            <div className="px-4 py-3">
+              <p className="mb-1.5 text-[10px] font-medium uppercase tracking-wide text-muted">Cleaned</p>
+              <p className="whitespace-pre-wrap text-[12.5px] leading-relaxed text-ink">{last.cleaned_text}</p>
             </div>
           </div>
-          <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
-            {lastResult.audio_file ? (
+
+          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line-soft px-4 py-2.5">
+            {last.audio_file ? (
               <AudioClip
-                src={api.audioUrl(lastResult.audio_file, 'recordings')}
-                duration={lastResult.duration}
-                label="Raw audio snippet"
-                className="w-full max-w-sm"
+                src={api.audioUrl(last.audio_file, 'recordings')}
+                duration={last.duration}
+                className="w-full max-w-xs"
               />
             ) : (
-              <span className="text-[11px] text-zinc-500">Raw audio was not archived for this capture.</span>
+              <span className="text-[11px] text-muted">Audio not archived</span>
             )}
-            <div className="flex items-center gap-2 text-[11px] text-zinc-500">
-              {lastResult.paste?.ok ? (
-                <>
-                  <Check className="h-3.5 w-3.5 text-emerald-400" /> Pasted into the active app
-                </>
-              ) : (
-                <>
-                  <AlertTriangle className="h-3.5 w-3.5 text-amber-400" />
-                  {lastResult.paste?.reason ?? 'Auto-paste unavailable'}
-                </>
-              )}
-            </div>
+            <span className="flex items-center gap-1.5 text-[11px] text-muted">
+              <StatusDot tone={last.paste?.ok ? 'ok' : 'warn'} />
+              {last.paste?.ok ? 'Inserted at cursor' : last.paste?.reason ?? 'Not inserted'}
+            </span>
           </div>
         </Panel>
       )}
 
-      <Panel className="p-5">
-        <SectionHeading
-          title="Dictation cleaner — live test bench"
-          description="Paste any raw transcript. The deterministic cleaner strips hesitations, collapses stutters, converts spoken punctuation and fixes casing — no network, no model."
-          action={<Badge tone="mint">offline</Badge>}
+      <Panel>
+        <PanelHeader
+          title="Cleaner test bench"
+          description="Paste a raw transcript and run the local rule engine. No model, no network."
+          action={<Badge>offline</Badge>}
         />
 
-        {localError && (
-          <p className="mt-3 rounded-lg border border-rose-400/25 bg-rose-500/10 px-3 py-2 text-[11px] text-rose-200">
-            {localError}
-          </p>
-        )}
-
-        <div className="mt-4 grid gap-4 lg:grid-cols-2">
-          <div className="flex flex-col gap-3">
-            <div className="rounded-xl border border-white/8 bg-black/25 p-3">
-              <div className="mb-2 flex items-center justify-between">
-                <p className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">Raw input</p>
-                <button
-                  type="button"
-                  onClick={() => setTestInput(SAMPLE_RAW)}
-                  className="text-[10px] text-zinc-500 transition-colors hover:text-zinc-200"
-                >
-                  reset sample
-                </button>
-              </div>
-              <textarea
-                value={testInput}
-                onChange={(event) => setTestInput(event.target.value)}
-                rows={6}
-                spellCheck={false}
-                className="w-full resize-none bg-transparent font-mono text-[12px] leading-relaxed text-zinc-300 outline-none placeholder:text-zinc-600"
-                placeholder="Type or paste a raw dictation transcript…"
-              />
+        <div className="grid divide-y divide-line-soft lg:grid-cols-2 lg:divide-x lg:divide-y-0">
+          <div className="flex flex-col">
+            <div className="flex items-center justify-between px-4 pt-3">
+              <p className="text-[10px] font-medium uppercase tracking-wide text-muted">Raw input</p>
+              <button
+                type="button"
+                onClick={() => setInput(SAMPLE)}
+                className="text-[10.5px] text-muted transition-colors hover:text-dim"
+              >
+                reset
+              </button>
             </div>
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <Toggle
-                checked={saveToHistory}
-                onChange={setSaveToHistory}
-                label="Archive to history"
-                hint="Keeps the raw and cleaned pair"
-              />
-              <Button variant="primary" onClick={() => void runCleaner()} disabled={cleaning || !testInput.trim()}>
-                <Wand2 className="h-3.5 w-3.5" />
-                {cleaning ? 'Cleaning…' : 'Run cleaner'}
-              </Button>
-            </div>
+            <textarea
+              value={input}
+              onChange={(event) => setInput(event.target.value)}
+              rows={7}
+              spellCheck={false}
+              className="min-h-[132px] flex-1 resize-none bg-transparent px-4 py-2 font-mono text-[11.5px] leading-relaxed text-dim outline-none placeholder:text-muted"
+              placeholder="Type or paste a raw dictation transcript"
+            />
           </div>
 
-          <div className="rounded-xl border border-brand-500/20 bg-brand-500/[0.06] p-3">
-            <div className="mb-2 flex items-center justify-between">
-              <p className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-brand-300">
-                <Sparkles className="h-3 w-3" /> Cleaned output
-              </p>
+          <div className="flex flex-col">
+            <div className="flex items-center justify-between px-4 pt-3">
+              <p className="text-[10px] font-medium uppercase tracking-wide text-muted">Cleaned output</p>
               {report?.cleaned && (
                 <button
                   type="button"
-                  onClick={() => void copyText(report.cleaned)}
-                  className="flex items-center gap-1 text-[10px] text-zinc-400 transition-colors hover:text-white"
+                  onClick={() => void copy(report.cleaned, 'out')}
+                  className="flex items-center gap-1 text-[10.5px] text-muted transition-colors hover:text-dim"
                 >
-                  {copied ? <Check className="h-3 w-3 text-emerald-400" /> : <Copy className="h-3 w-3" />}
-                  {copied ? 'Copied' : 'Copy'}
+                  {copied === 'out' ? <Check className="h-3 w-3 text-ok" /> : <Copy className="h-3 w-3" />}
+                  {copied === 'out' ? 'Copied' : 'Copy'}
                 </button>
               )}
             </div>
             {report?.cleaned ? (
-              <p className="min-h-[132px] whitespace-pre-wrap text-[13px] leading-relaxed text-white">{report.cleaned}</p>
+              <>
+                <p className="flex-1 whitespace-pre-wrap px-4 py-2 text-[12.5px] leading-relaxed text-ink">
+                  {report.cleaned}
+                </p>
+                <div className="flex flex-wrap items-center justify-between gap-2 px-4 pb-2">
+                  <FixSummary report={report} />
+                  <span className="font-mono text-[10px] text-muted">
+                    {report.total_fixes} fixes
+                  </span>
+                </div>
+              </>
             ) : (
               <EmptyState
-                icon={<Eraser className="h-4 w-4" />}
                 title="Nothing cleaned yet"
-                description="Run the cleaner to see fillers removed, stutters collapsed and punctuation restored."
+                description="Run the cleaner to see filler removal, stutter collapse and punctuation."
               />
-            )}
-            {report && (
-              <div className="mt-3 border-t border-white/8 pt-3">
-                <ReportChips report={report} />
-                {report.stages.length > 0 && (
-                  <div className="mt-2 flex flex-wrap gap-1">
-                    {report.stages.map((stage) => (
-                      <span key={stage} className="rounded bg-black/25 px-1.5 py-0.5 font-mono text-[9px] text-zinc-500">
-                        {stage}
-                      </span>
-                    ))}
-                  </div>
-                )}
-              </div>
             )}
           </div>
         </div>
 
-        <p className="mt-4 flex flex-wrap items-center gap-1.5 text-[11px] text-zinc-500">
-          Try saying <KeyCap>comma</KeyCap> <KeyCap>new line</KeyCap> <KeyCap>question mark</KeyCap> — they become
-          real typography.
-        </p>
+        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line-soft px-4 py-2.5">
+          <label className="flex items-center gap-2 text-[11px] text-dim">
+            <Switch checked={save} onChange={setSave} label="Archive result to history" />
+            Archive result
+          </label>
+          <div className="flex items-center gap-2">
+            {error && <span className="text-[11px] text-err">{error}</span>}
+            <Button variant="primary" onClick={() => void runCleaner()} disabled={cleaning || !input.trim()}>
+              {cleaning ? 'Cleaning…' : 'Run cleaner'}
+            </Button>
+          </div>
+        </div>
       </Panel>
     </div>
   );

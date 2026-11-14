@@ -51,14 +51,14 @@ e inyección de teclado se han detectado.
 
 | Función | Estado |
 | :--- | :--- |
-| Limpieza determinista del dictado (muletillas, tartamudeos, puntuación hablada, mayúsculas, siglas) | ✅ Completo, 20 pruebas, <1 ms |
-| Preservación doble (WAV original + transcripción cruda + texto limpio) | ✅ Completo, con búsqueda y exportación |
-| Perfiles de voz (grabación en navegador → WAV 16 kHz → validación → análisis de tono) | ✅ Completo |
-| Síntesis offline | ✅ Funciona (calidad de vista previa); Kokoro-82M la hace neuronal |
-| Atajo global + pegado automático | ✅ Implementado (requiere `pynput` y herramienta de portapapeles) |
-| Transcripción Whisper | ✅ Implementado (faster-whisper / whisper) |
-| Adaptador Kokoro-82M / Piper | ⏳ En curso |
-| Shell de escritorio Tauri | ⏳ Andamiaje |
+| Limpieza determinista del dictado (muletillas, tartamudeos, puntuación hablada, mayúsculas, siglas) | Completo, 20 pruebas, <1 ms |
+| Preservación doble (WAV original + transcripción cruda + texto limpio) | Completo, con búsqueda y exportación |
+| Perfiles de voz (grabación en navegador → WAV 16 kHz → validación → análisis de tono) | Completo |
+| Síntesis offline | Funciona (calidad de vista previa); Kokoro-82M la hace neuronal |
+| Atajo global + pegado automático | Implementado (requiere `pynput` y herramienta de portapapeles) |
+| Transcripción Whisper | Implementado (faster-whisper / whisper) |
+| Adaptador Kokoro-82M / Piper | WIP · En curso |
+| Shell de escritorio Tauri | WIP · Andamiaje |
 
 ## Niveles de modelo
 

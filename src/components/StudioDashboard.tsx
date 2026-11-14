@@ -17,15 +17,13 @@ export function StudioDashboard({
   onTabChange: (tab: TabId) => void;
 }) {
   const { capabilities, config, stats, online, refresh } = engine;
-  const demo = capabilities?.demo_mode ?? false;
-  const presetLabel = config?.active_preset ?? capabilities?.preset ?? 'balanced';
 
   return (
     <div className="flex h-screen w-full overflow-hidden">
       <Sidebar
         active={tab}
         onChange={onTabChange}
-        presetLabel={presetLabel}
+        presetLabel={config?.active_preset ?? 'balanced'}
         online={online}
         entryCount={stats?.entries ?? 0}
       />
@@ -34,14 +32,14 @@ export function StudioDashboard({
         <HeaderBar
           tab={tab}
           online={online}
-          demo={demo}
+          demo={capabilities?.demo_mode ?? false}
           hotkey={config?.hotkey ?? 'Ctrl+Space'}
           onRetry={() => void refresh()}
           onTabChange={onTabChange}
         />
 
-        <div className="flex-1 overflow-y-auto px-5 pb-32 pt-5 sm:px-7">
-          <div className="mx-auto w-full max-w-6xl">
+        <div className="flex-1 overflow-y-auto">
+          <div className="mx-auto w-full max-w-[1080px] px-4 pb-24 pt-5 sm:px-6">
             {tab === 'dictation' && <DictationTab engine={engine} />}
             {tab === 'cloning' && <CloningTab engine={engine} />}
             {tab === 'presets' && <PresetsTab engine={engine} />}

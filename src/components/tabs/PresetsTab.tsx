@@ -1,171 +1,149 @@
-import { Check, Cpu, Gauge, HardDrive, Info, Zap } from 'lucide-react';
+import type { ReactNode } from 'react';
+import { Check } from 'lucide-react';
 import type { EngineStore } from '../../hooks/useEngine';
-import { Badge, Button, cn, Panel, SectionHeading } from '../ui';
+import { cn, Panel, PanelHeader, StatusDot } from '../ui';
 
-function ScoreBar({ label, value, max = 10, tone }: { label: string; value: number; max?: number; tone: string }) {
-  return (
-    <div>
-      <div className="mb-1 flex items-center justify-between text-[10px] text-zinc-500">
-        <span>{label}</span>
-        <span className="font-mono text-zinc-400">{value.toFixed(1)}</span>
-      </div>
-      <div className="h-1.5 overflow-hidden rounded-full bg-white/8">
-        <div className={cn('h-full rounded-full', tone)} style={{ width: `${Math.min(100, (value / max) * 100)}%` }} />
-      </div>
-    </div>
-  );
+function Cell({ children, className }: { children: ReactNode; className?: string }) {
+  return <td className={cn('px-3 py-2.5 align-top text-[11.5px] text-dim', className)}>{children}</td>;
 }
 
 export function PresetsTab({ engine }: { engine: EngineStore }) {
   const { presets, config, capabilities, selectPreset, online } = engine;
-  const activeId = config?.active_preset ?? capabilities?.preset ?? 'balanced';
+  const activeId = config?.active_preset ?? 'balanced';
+
+  const runtime = [
+    {
+      label: 'Microphone',
+      ok: !!capabilities?.microphone.available,
+      detail: capabilities?.microphone.available
+        ? capabilities.microphone.device ?? 'default input'
+        : capabilities?.microphone.reason ?? 'not detected',
+    },
+    {
+      label: 'Speech-to-text',
+      ok: !!capabilities?.stt.available,
+      detail: capabilities?.stt.available
+        ? `${capabilities?.stt.backend} · ${capabilities?.stt.model}`
+        : capabilities?.stt.reason ?? 'not installed',
+    },
+    {
+      label: 'Speech synthesis',
+      ok: (capabilities?.tts.quality ?? 'preview') === 'neural',
+      detail: `${capabilities?.tts.engine ?? 'preview'} · ${capabilities?.tts.quality ?? 'preview'} quality`,
+    },
+    {
+      label: 'Clipboard',
+      ok: !!capabilities?.injector.clipboard,
+      detail: capabilities?.injector.clipboard
+        ? capabilities.injector.clipboard_tool ?? 'available'
+        : 'no clipboard tool',
+    },
+    {
+      label: 'Keystroke injection',
+      ok: !!capabilities?.injector.keystroke,
+      detail: capabilities?.injector.keystroke ? 'pynput' : 'pynput not installed',
+    },
+  ];
 
   return (
-    <div className="space-y-6">
-      <Panel className="p-5">
-        <SectionHeading
-          title="Hardware performance tiers"
-          description="Each tier selects an STT model size, a TTS backend and a VAD strategy. Switching is instant — the Whisper model is released and reloaded so RAM stays predictable."
-          action={<Badge tone="brand">{activeId} active</Badge>}
+    <div className="space-y-4">
+      <Panel>
+        <PanelHeader
+          title="Preset"
+          description="Switching releases the current Whisper model before loading the next one."
+          action={<span className="font-mono text-[10.5px] text-muted">{activeId}</span>}
         />
 
-        <div className="mt-5 grid gap-4 lg:grid-cols-3">
-          {presets.map((preset) => {
-            const active = preset.id === activeId;
-            return (
-              <button
-                key={preset.id}
-                type="button"
-                onClick={() => void selectPreset(preset.id)}
-                disabled={!online}
-                className={cn(
-                  'flex flex-col rounded-2xl border p-4 text-left transition-all disabled:opacity-60',
-                  active
-                    ? 'border-brand-500/50 bg-brand-500/[0.08] shadow-lg shadow-brand-500/10'
-                    : 'border-white/8 bg-white/[0.02] hover:border-white/20',
-                )}
-              >
-                <div className="flex items-center justify-between">
-                  <span className="text-lg" aria-hidden="true">{preset.badge}</span>
-                  {active ? (
-                    <span className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider text-brand-300">
-                      <Check className="h-3 w-3" /> active
-                    </span>
-                  ) : (
-                    <span className="text-[10px] uppercase tracking-wider text-zinc-600">select</span>
-                  )}
-                </div>
-
-                <h4 className="mt-2 text-[15px] font-semibold text-white">{preset.name}</h4>
-                <p className="text-[11px] text-zinc-500">{preset.tagline}</p>
-
-                <div className="mt-3 space-y-1.5 rounded-xl bg-black/25 p-2.5 font-mono text-[10px]">
-                  <div className="flex justify-between gap-2">
-                    <span className="text-zinc-500">STT</span>
-                    <span className="truncate text-zinc-300">{preset.stt_model}</span>
-                  </div>
-                  <div className="flex justify-between gap-2">
-                    <span className="text-zinc-500">TTS</span>
-                    <span className="truncate text-zinc-300">{preset.tts_model}</span>
-                  </div>
-                  <div className="flex justify-between gap-2">
-                    <span className="text-zinc-500">VAD</span>
-                    <span className="truncate text-zinc-300">{preset.vad}</span>
-                  </div>
-                </div>
-
-                <p className="mt-3 text-[11px] leading-relaxed text-zinc-400">{preset.description}</p>
-
-                <div className="mt-4 space-y-2">
-                  <ScoreBar label="Accuracy" value={preset.accuracy_score} tone="bg-gradient-to-r from-brand-500 to-purple-400" />
-                  <ScoreBar label="Speed" value={preset.speed_score} tone="bg-gradient-to-r from-emerald-500 to-teal-400" />
-                </div>
-
-                <div className="mt-3 flex flex-wrap gap-1.5 border-t border-white/6 pt-3 text-[10px] text-zinc-500">
-                  <span className="inline-flex items-center gap-1">
-                    <Gauge className="h-3 w-3" /> ~{preset.latency_target_ms} ms
-                  </span>
-                  <span className="inline-flex items-center gap-1">
-                    <HardDrive className="h-3 w-3" /> {preset.ram_required}
-                  </span>
-                  <span className="inline-flex items-center gap-1">
-                    <Cpu className="h-3 w-3" /> {preset.vram_required}
-                  </span>
-                </div>
-              </button>
-            );
-          })}
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[620px] border-collapse text-left">
+            <thead>
+              <tr className="border-b border-line-soft text-[10px] uppercase tracking-wide text-muted">
+                <th className="px-3 py-2 font-medium">Tier</th>
+                <th className="px-3 py-2 font-medium">Speech-to-text</th>
+                <th className="px-3 py-2 font-medium">Text-to-speech</th>
+                <th className="px-3 py-2 font-medium">Latency</th>
+                <th className="px-3 py-2 font-medium">Memory</th>
+              </tr>
+            </thead>
+            <tbody>
+              {presets.map((preset) => {
+                const isActive = preset.id === activeId;
+                return (
+                  <tr
+                    key={preset.id}
+                    onClick={() => void selectPreset(preset.id)}
+                    className={cn(
+                      'cursor-pointer border-b border-line-soft transition-colors last:border-0',
+                      isActive ? 'bg-accent/[0.06]' : 'hover:bg-white/[0.025]',
+                      !online && 'pointer-events-none opacity-60',
+                    )}
+                  >
+                    <td className="px-3 py-2.5">
+                      <div className="flex items-start gap-2">
+                        <span
+                          className={cn(
+                            'mt-[3px] grid h-3.5 w-3.5 shrink-0 place-items-center rounded-full border',
+                            isActive ? 'border-accent' : 'border-line',
+                          )}
+                        >
+                          {isActive && <Check className="h-2.5 w-2.5 text-accent" />}
+                        </span>
+                        <span>
+                          <span className="block text-[12px] font-medium text-ink">{preset.name}</span>
+                          <span className="block text-[10.5px] text-muted">{preset.tagline}</span>
+                        </span>
+                      </div>
+                    </td>
+                    <Cell className="font-mono text-[10.5px]">{preset.stt_model}</Cell>
+                    <Cell className="font-mono text-[10.5px]">{preset.tts_model}</Cell>
+                    <Cell className="tabular font-mono text-[10.5px]">~{preset.latency_target_ms} ms</Cell>
+                    <Cell className="tabular font-mono text-[10.5px]">{preset.ram_required}</Cell>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
         </div>
+
+        <p className="border-t border-line-soft px-3 py-2 text-[10.5px] leading-relaxed text-muted">
+          {presets.find((preset) => preset.id === activeId)?.description}
+        </p>
       </Panel>
 
       <div className="grid gap-4 lg:grid-cols-2">
-        <Panel className="p-5">
-          <SectionHeading title="Runtime detected" description="What the engine can actually load on this machine right now." />
-          <ul className="mt-4 space-y-2 text-[12px]">
-            {[
-              {
-                label: 'Microphone',
-                ok: capabilities?.microphone.available ?? false,
-                detail: capabilities?.microphone.available
-                  ? capabilities.microphone.device ?? 'default input'
-                  : capabilities?.microphone.reason ?? 'not detected',
-              },
-              {
-                label: 'Whisper runtime',
-                ok: capabilities?.stt.available ?? false,
-                detail: capabilities?.stt.available
-                  ? `${capabilities?.stt.backend} · ${capabilities?.stt.model}`
-                  : capabilities?.stt.reason ?? 'not installed',
-              },
-              {
-                label: 'TTS backend',
-                ok: (capabilities?.tts.quality ?? 'preview') === 'neural',
-                detail: `${capabilities?.tts.engine ?? 'preview'} (${capabilities?.tts.quality ?? 'preview'})`,
-              },
-              {
-                label: 'Keystroke injection',
-                ok: capabilities?.injector.keystroke ?? false,
-                detail: capabilities?.injector.clipboard
-                  ? `clipboard via ${capabilities.injector.clipboard_tool}`
-                  : 'no clipboard tool',
-              },
-            ].map((row) => (
-              <li key={row.label} className="flex items-start gap-2.5 rounded-lg border border-white/6 bg-white/[0.02] px-3 py-2">
-                <span className={cn('mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full', row.ok ? 'bg-emerald-400' : 'bg-amber-400')} />
-                <div className="min-w-0">
-                  <p className="text-zinc-200">{row.label}</p>
-                  <p className="truncate text-[11px] text-zinc-500" title={row.detail}>{row.detail}</p>
-                </div>
-              </li>
+        <Panel>
+          <PanelHeader title="Runtime" description="Capabilities detected on this machine." />
+          <dl className="divide-rows">
+            {runtime.map((item) => (
+              <div key={item.label} className="flex items-start justify-between gap-4 px-4 py-2.5">
+                <dt className="shrink-0 text-[11.5px] text-dim">{item.label}</dt>
+                <dd className="flex min-w-0 items-center gap-1.5 text-right text-[11px] text-muted">
+                  <StatusDot tone={item.ok ? 'ok' : 'warn'} />
+                  <span className="truncate" title={item.detail}>{item.detail}</span>
+                </dd>
+              </div>
             ))}
-          </ul>
+          </dl>
         </Panel>
 
-        <Panel className="p-5">
-          <SectionHeading title="Install the heavy models" description="Optional dependencies unlock real transcription and neural voices." />
-          <div className="mt-4 space-y-2 font-mono text-[11px]">
+        <Panel>
+          <PanelHeader title="Optional dependencies" description="Install only what you need; the engine starts without them." />
+          <div className="divide-rows">
             {[
-              ['pip install faster-whisper', 'Whisper inference (CPU, int8)'],
-              ['pip install sounddevice numpy', 'Microphone capture via PortAudio'],
-              ['pip install pynput', 'Global hotkeys + keystroke paste'],
-              ['pip install kokoro-onnx', 'Kokoro-82M neural TTS'],
-            ].map(([command, detail]) => (
-              <div key={command} className="rounded-lg border border-white/8 bg-black/30 px-3 py-2">
-                <code className="block truncate text-brand-200">{command}</code>
-                <span className="text-[10px] text-zinc-500">{detail}</span>
+              ['faster-whisper', 'On-device transcription'],
+              ['sounddevice numpy', 'Microphone capture'],
+              ['pynput', 'Global shortcuts and paste'],
+              ['kokoro-onnx', 'Kokoro-82M neural voices'],
+            ].map(([pkg, detail]) => (
+              <div key={pkg} className="flex items-center justify-between gap-3 px-4 py-2">
+                <code className="font-mono text-[11px] text-dim">pip install {pkg}</code>
+                <span className="text-[10.5px] text-muted">{detail}</span>
               </div>
             ))}
           </div>
-          <div className="mt-4 flex items-start gap-2 rounded-lg border border-brand-500/20 bg-brand-500/[0.06] px-3 py-2 text-[11px] leading-relaxed text-brand-100/80">
-            <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-            Models are downloaded once by their own tooling and then run permanently offline. OpenFlow never proxies
-            audio to a server.
-          </div>
-          <div className="mt-4 flex flex-wrap gap-2">
-            <Button variant="secondary" onClick={() => void selectPreset('balanced')} disabled={!online}>
-              <Zap className="h-3.5 w-3.5" /> Use recommended tier
-            </Button>
-          </div>
+          <p className="border-t border-line-soft px-4 py-2 text-[10.5px] leading-relaxed text-muted">
+            Models are fetched once by their own tooling and then run offline. Nothing is proxied through a server.
+          </p>
         </Panel>
       </div>
     </div>

@@ -4,33 +4,29 @@ import { cn } from './ui';
 
 export interface AudioClipProps {
   src: string;
-  /** Duration reported by the engine (used until the browser knows better). */
   duration?: number;
-  label?: string;
-  compact?: boolean;
   className?: string;
   onError?: (message: string) => void;
+  showDownload?: boolean;
 }
 
-function formatTime(seconds: number): string {
+function clock(seconds: number): string {
   if (!Number.isFinite(seconds) || seconds < 0) return '0:00';
   const total = Math.round(seconds);
   return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`;
 }
 
-/** Inline player for raw dictation snippets and synthesized speech. */
-export function AudioClip({ src, duration, label, compact, className, onError }: AudioClipProps) {
+/** Minimal inline player: play/pause, scrub line, elapsed time. */
+export function AudioClip({ src, duration, className, onError, showDownload = true }: AudioClipProps) {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const [playing, setPlaying] = useState(false);
   const [current, setCurrent] = useState(0);
   const [total, setTotal] = useState(duration ?? 0);
-  const [failed, setFailed] = useState(false);
 
   useEffect(() => {
     setPlaying(false);
     setCurrent(0);
     setTotal(duration ?? 0);
-    setFailed(false);
   }, [src, duration]);
 
   const toggle = async () => {
@@ -43,54 +39,44 @@ export function AudioClip({ src, duration, label, compact, className, onError }:
     try {
       await audio.play();
     } catch {
-      setFailed(true);
-      onError?.('The browser blocked audio playback. Try again from a user gesture.');
+      onError?.('Playback was blocked. Try again.');
     }
   };
 
   const progress = total > 0 ? Math.min(100, (current / total) * 100) : 0;
 
   return (
-    <div
-      className={cn(
-        'flex items-center gap-2.5 rounded-xl border border-white/8 bg-white/[0.03] px-2.5 py-1.5',
-        className,
-      )}
-    >
+    <div className={cn('flex items-center gap-2', className)}>
       <button
         type="button"
         onClick={toggle}
-        aria-label={playing ? 'Pause audio' : 'Play audio'}
-        className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-brand-500/15 text-brand-300 transition-colors hover:bg-brand-500/25 hover:text-white"
+        aria-label={playing ? 'Pause' : 'Play'}
+        className="grid h-6 w-6 shrink-0 place-items-center rounded-full border border-line bg-raised text-dim transition-colors hover:text-ink"
       >
-        {playing ? <Pause className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5 translate-x-[1px]" />}
+        {playing ? <Pause className="h-3 w-3" /> : <Play className="h-3 w-3 translate-x-[0.5px]" />}
       </button>
 
       <div className="min-w-0 flex-1">
-        <div className="flex items-center justify-between gap-2">
-          {!compact && label && (
-            <span className="truncate text-[11px] font-medium text-zinc-400">{label}</span>
-          )}
-          <span className="ml-auto shrink-0 font-mono text-[10px] text-zinc-500">
-            {formatTime(current)} / {formatTime(total)}
-          </span>
-        </div>
-        <div className="mt-1 h-1 overflow-hidden rounded-full bg-white/10">
-          <div
-            className="h-full rounded-full bg-gradient-to-r from-brand-500 to-purple-400 transition-[width] duration-100"
-            style={{ width: `${failed ? 0 : progress}%` }}
-          />
+        <div className="h-[3px] overflow-hidden rounded-full bg-[#26262b]">
+          <div className="h-full rounded-full bg-accent/70" style={{ width: `${progress}%` }} />
         </div>
       </div>
 
-      <a
-        href={src}
-        download
-        aria-label="Download audio"
-        className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-zinc-500 transition-colors hover:bg-white/5 hover:text-zinc-200"
-      >
-        <Download className="h-3.5 w-3.5" />
-      </a>
+      <span className="tabular shrink-0 font-mono text-[10px] text-muted">
+        {clock(current)} / {clock(total)}
+      </span>
+
+      {showDownload && (
+        <a
+          href={src}
+          download
+          aria-label="Download audio"
+          title="Download audio"
+          className="grid h-6 w-6 shrink-0 place-items-center rounded-md text-muted transition-colors hover:bg-white/[0.06] hover:text-ink"
+        >
+          <Download className="h-3 w-3" />
+        </a>
+      )}
 
       <audio
         ref={audioRef}
@@ -107,10 +93,7 @@ export function AudioClip({ src, duration, label, compact, className, onError }:
           const value = event.currentTarget.duration;
           if (Number.isFinite(value) && value > 0) setTotal(value);
         }}
-        onError={() => {
-          setFailed(true);
-          onError?.('That recording could not be loaded from the engine.');
-        }}
+        onError={() => onError?.('That recording could not be loaded.')}
         className="hidden"
       />
     </div>

@@ -51,14 +51,14 @@ erkannt wurden.
 
 | Funktion | Status |
 | :--- | :--- |
-| Deterministische Diktat-Bereinigung (Füllwörter, Stottern, Satzzeichen, Groß-/Kleinschreibung, Akronyme) | ✅ Fertig, 20 Tests, unter 1 ms |
-| Doppelte Aufbewahrung (rohe WAV + Rohtranskript + bereinigter Text) | ✅ Fertig, durchsuchbar und exportierbar |
-| Stimmprofile (Browser-Aufnahme → 16-kHz-WAV → Prüfung → Tonhöhenanalyse) | ✅ Fertig |
-| Offline-Sprachsynthese | ✅ Funktioniert (Vorschau-Qualität); mit Kokoro-82M neuronal |
-| Globaler Hotkey + automatisches Einfügen | ✅ Implementiert (benötigt `pynput` und Clipboard-Tool) |
-| Whisper-Transkription | ✅ Implementiert (faster-whisper / whisper) |
-| Kokoro-82M / Piper-Adapter | ⏳ In Arbeit |
-| Tauri-Desktop-Shell | ⏳ Gerüst |
+| Deterministische Diktat-Bereinigung (Füllwörter, Stottern, Satzzeichen, Groß-/Kleinschreibung, Akronyme) | Fertig, 20 Tests, unter 1 ms |
+| Doppelte Aufbewahrung (rohe WAV + Rohtranskript + bereinigter Text) | Fertig, durchsuchbar und exportierbar |
+| Stimmprofile (Browser-Aufnahme → 16-kHz-WAV → Prüfung → Tonhöhenanalyse) | Fertig |
+| Offline-Sprachsynthese | Funktioniert (Vorschau-Qualität); mit Kokoro-82M neuronal |
+| Globaler Hotkey + automatisches Einfügen | Implementiert (benötigt `pynput` und Clipboard-Tool) |
+| Whisper-Transkription | Implementiert (faster-whisper / whisper) |
+| Kokoro-82M / Piper-Adapter | WIP · In Arbeit |
+| Tauri-Desktop-Shell | WIP · Gerüst |
 
 ## Modellstufen
 

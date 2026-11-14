@@ -22,7 +22,6 @@ PRESETS: Dict[str, Dict[str, Any]] = {
     "fast": {
         "id": "fast",
         "name": "Fast",
-        "badge": "⚡",
         "tagline": "Instant, any laptop",
         "stt_model": "whisper tiny.en · q5_1",
         "stt_model_key": "tiny.en",
@@ -39,7 +38,6 @@ PRESETS: Dict[str, Dict[str, Any]] = {
     "balanced": {
         "id": "balanced",
         "name": "Balanced",
-        "badge": "⚖️",
         "tagline": "Recommended default",
         "stt_model": "Whisper small.en · q5_k",
         "stt_model_key": "small.en",
@@ -56,7 +54,6 @@ PRESETS: Dict[str, Dict[str, Any]] = {
     "pro": {
         "id": "pro",
         "name": "Pro Studio",
-        "badge": "💎",
         "tagline": "Maximum fidelity",
         "stt_model": "Whisper large-v3-turbo",
         "stt_model_key": "large-v3-turbo",

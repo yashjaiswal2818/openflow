@@ -1,71 +1,43 @@
-import { useEffect, useMemo, useState } from 'react';
-import {
-  AlertTriangle,
-  Archive,
-  AudioLines,
-  Check,
-  ClipboardCopy,
-  Loader2,
-  Mic,
-  Radio,
-  Square,
-  WifiOff,
-} from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { AlertCircle, Check, Loader2, Maximize2, Mic, Square } from 'lucide-react';
 import type { DictationStatus } from '../lib/types';
 import { Waveform } from './Waveform';
-import { cn, KeyCap } from './ui';
+import { cn, Keycap } from './ui';
 
 export interface FloatingPillProps {
   status: DictationStatus;
   audioLevel: number;
   isRecording: boolean;
   latencyMs?: number | null;
-  demo: boolean;
   hotkey: string;
   message?: string;
-  previewText?: string;
   online: boolean;
   onToggle: () => void;
   onOpenStudio?: () => void;
 }
 
-const STATUS_COPY: Record<DictationStatus, { label: string; tone: string }> = {
-  ready: { label: 'Ready', tone: 'text-zinc-300' },
-  listening: { label: 'Listening', tone: 'text-brand-300' },
-  processing: { label: 'Formatting', tone: 'text-amber-300' },
-  pasted: { label: 'Pasted', tone: 'text-emerald-300' },
-  copied: { label: 'Copied', tone: 'text-emerald-300' },
-  saved: { label: 'Saved', tone: 'text-brand-300' },
-  error: { label: 'Error', tone: 'text-rose-300' },
+const LABELS: Record<DictationStatus, string> = {
+  ready: 'Ready',
+  listening: 'Listening',
+  processing: 'Formatting',
+  pasted: 'Pasted',
+  copied: 'Copied',
+  saved: 'Saved',
+  error: 'Error',
 };
 
-function formatLatency(ms?: number | null): string | null {
-  if (ms == null || ms <= 0) return null;
-  return ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${ms}ms`;
-}
-
-/**
- * The Wispr-Flow-style floating pill. Three widths:
- *   resting  ->  260px  (status + hotkey)
- *   listening->  auto   (waveform + elapsed seconds)
- *   result   ->  auto   (latency + text preview)
- */
 export function FloatingPill({
   status,
   audioLevel,
   isRecording,
   latencyMs,
-  demo,
   hotkey,
   message,
-  previewText,
   online,
   onToggle,
   onOpenStudio,
 }: FloatingPillProps) {
   const [elapsed, setElapsed] = useState(0);
-  const active = status === 'listening';
-  const processing = status === 'processing';
 
   useEffect(() => {
     if (!isRecording) {
@@ -77,35 +49,32 @@ export function FloatingPill({
     return () => window.clearInterval(timer);
   }, [isRecording]);
 
-  const copy = STATUS_COPY[status] ?? STATUS_COPY.ready;
-  const latency = formatLatency(latencyMs);
-  const expanded =
-    active || processing || status === 'pasted' || status === 'copied' || status === 'saved' || status === 'error';
+  const busy = status === 'processing';
+  const settled = status === 'pasted' || status === 'copied' || status === 'saved';
+  const failed = status === 'error' || !online;
+  const showDetail = status === 'listening' || busy || settled || status === 'error';
 
-  const detail = useMemo(() => {
-    if (!online) return 'Engine offline — start it with npm run engine';
-    if (status === 'listening') return 'Release to transcribe';
-    if (processing) return 'Removing fillers and formatting punctuation';
-    if (status === 'pasted') return message || 'Inserted into the active app';
-    if (status === 'copied') return message || 'On your clipboard — press paste';
-    if (status === 'saved') return message || 'Archived in history — clipboard unavailable';
-    if (status === 'error') return message || 'Something went wrong';
-    return previewText || message || 'Hold the hotkey and speak';
-  }, [message, online, previewText, processing, status]);
+  const detail = !online
+    ? 'Engine not running'
+    : status === 'listening'
+      ? 'Release to transcribe'
+      : busy
+        ? 'Cleaning transcript'
+        : settled
+          ? message || 'Archived to history'
+          : status === 'error'
+            ? message || 'Capture failed'
+            : 'Hold the shortcut and speak';
 
   return (
-    <div className="pointer-events-none fixed inset-x-0 bottom-6 z-50 flex justify-center px-4">
+    <div className="pointer-events-none fixed inset-x-0 bottom-5 z-50 flex justify-center px-4">
       <div
-        className={cn(
-          'pointer-events-auto glass-pill flex items-center gap-3 rounded-full px-2.5 py-2 transition-all duration-300 ease-out',
-          expanded ? 'max-w-[min(92vw,560px)]' : 'max-w-[min(92vw,340px)]',
-          active && 'ring-1 ring-brand-400/40 shadow-[0_0_40px_-8px_rgba(99,102,241,0.55)]',
-          status === 'pasted' && 'ring-1 ring-emerald-400/35 shadow-[0_0_40px_-10px_rgba(52,211,153,0.5)]',
-          status === 'error' && 'ring-1 ring-rose-400/40',
-          !online && 'ring-1 ring-amber-400/30',
-        )}
         role="status"
         aria-live="polite"
+        className={cn(
+          'pointer-events-auto flex h-11 items-center gap-2 rounded-full border border-line bg-[#141416]/95 pl-1.5 pr-2 shadow-[0_10px_30px_rgba(0,0,0,0.45)] backdrop-blur-sm transition-[max-width] duration-200',
+          showDetail ? 'max-w-[min(92vw,440px)]' : 'max-w-[min(92vw,260px)]',
+        )}
       >
         <button
           type="button"
@@ -113,63 +82,52 @@ export function FloatingPill({
           disabled={!online}
           aria-label={isRecording ? 'Stop dictation' : 'Start dictation'}
           className={cn(
-            'relative flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-white transition-all',
-            !online && 'cursor-not-allowed bg-white/10 text-zinc-500',
-            online && isRecording && 'bg-rose-500 shadow-lg shadow-rose-500/40 hover:bg-rose-400',
-            online && !isRecording && 'bg-brand-600 shadow-lg shadow-brand-600/30 hover:bg-brand-500',
+            'grid h-8 w-8 shrink-0 place-items-center rounded-full transition-colors',
+            !online
+              ? 'cursor-not-allowed bg-raised text-muted'
+              : isRecording
+                ? 'bg-err text-white hover:bg-err/90'
+                : 'bg-accent text-white hover:bg-accent-strong',
           )}
         >
-          {!online ? (
-            <WifiOff className="h-4 w-4" />
-          ) : isRecording ? (
-            <Square className="h-3.5 w-3.5 fill-current" />
-          ) : (
-            <Mic className="h-4 w-4" />
-          )}
-          {active && (
-            <span className="absolute inset-0 rounded-full ring-1 ring-rose-300/50 ping-ring" />
-          )}
+          {!online ? <Mic className="h-3.5 w-3.5" /> : isRecording ? <Square className="h-3 w-3 fill-current" /> : <Mic className="h-3.5 w-3.5" />}
         </button>
 
-        <div className="min-w-0 flex-1 pr-1">
-          <div className="flex items-center gap-2">
-            {active && (
-              <Waveform level={audioLevel} active={active} maxHeight={22} className="mr-0.5" />
-            )}
+        <div className="flex min-w-0 flex-1 items-center gap-2">
+          {isRecording ? (
+            <Waveform level={audioLevel} active />
+          ) : busy ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin text-warn" />
+          ) : failed ? (
+            <AlertCircle className={cn('h-3.5 w-3.5', online ? 'text-err' : 'text-warn')} />
+          ) : settled ? (
+            <Check className="h-3.5 w-3.5 text-ok" />
+          ) : (
+            <span className="h-1.5 w-1.5 rounded-full bg-ok" />
+          )}
 
-            {processing && <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-amber-300 spinner" />}
-            {status === 'pasted' && <Check className="h-3.5 w-3.5 shrink-0 text-emerald-300" />}
-            {status === 'copied' && <ClipboardCopy className="h-3.5 w-3.5 shrink-0 text-emerald-300" />}
-            {status === 'saved' && <Archive className="h-3.5 w-3.5 shrink-0 text-brand-300" />}
-            {status === 'error' && <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-rose-300" />}
-            {status === 'ready' && online && <Radio className="h-3.5 w-3.5 shrink-0 text-emerald-400" />}
-            {!online && <WifiOff className="h-3.5 w-3.5 shrink-0 text-amber-300" />}
+          <span className="shrink-0 text-[11.5px] font-medium text-ink">
+            {online ? LABELS[status] : 'Disconnected'}
+          </span>
 
-            <span className={cn('truncate text-xs font-semibold tracking-wide', !online ? 'text-amber-200' : copy.tone)}>
-              {!online ? 'Disconnected' : copy.label}
-              {active && (
-                <span className="ml-1.5 font-mono text-[11px] font-normal text-brand-200/70">
-                  {elapsed.toFixed(1)}s
-                </span>
-              )}
+          {isRecording && (
+            <span className="tabular shrink-0 font-mono text-[10.5px] text-muted">{elapsed.toFixed(1)}s</span>
+          )}
+
+          {showDetail && (
+            <span className="min-w-0 truncate border-l border-line pl-2 text-[10.5px] text-muted">{detail}</span>
+          )}
+
+          {latencyMs != null && latencyMs > 0 && !isRecording && (
+            <span className="tabular ml-auto shrink-0 font-mono text-[10px] text-muted">
+              {latencyMs >= 1000 ? `${(latencyMs / 1000).toFixed(1)}s` : `${latencyMs}ms`}
             </span>
-
-            {demo && (
-              <span className="shrink-0 rounded-full bg-amber-400/10 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-amber-300 ring-1 ring-amber-400/25">
-                demo
-              </span>
-            )}
-            {latency && !isRecording && (
-              <span className="shrink-0 font-mono text-[10px] text-zinc-500">{latency}</span>
-            )}
-          </div>
-
-          <p className="mt-0.5 truncate text-[11px] leading-tight text-zinc-500">{detail}</p>
+          )}
         </div>
 
-        {!expanded && online && (
-          <div className="hidden items-center gap-1 pr-1 sm:flex">
-            <KeyCap>{hotkey}</KeyCap>
+        {!showDetail && online && (
+          <div className="hidden items-center gap-1 pr-0.5 sm:flex">
+            <Keycap>{hotkey}</Keycap>
           </div>
         )}
 
@@ -177,10 +135,11 @@ export function FloatingPill({
           <button
             type="button"
             onClick={onOpenStudio}
-            aria-label="Open OpenFlow Studio"
-            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-zinc-500 transition-colors hover:bg-white/5 hover:text-white"
+            aria-label="Open studio"
+            title="Open studio"
+            className="grid h-7 w-7 shrink-0 place-items-center rounded-full text-muted transition-colors hover:bg-white/[0.06] hover:text-ink"
           >
-            <AudioLines className="h-4 w-4" />
+            <Maximize2 className="h-3 w-3" />
           </button>
         )}
       </div>

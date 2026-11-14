@@ -12,7 +12,6 @@ export type DictationStatus =
 export interface Preset {
   id: string;
   name: string;
-  badge: string;
   tagline: string;
   stt_model: string;
   stt_model_key: string;
